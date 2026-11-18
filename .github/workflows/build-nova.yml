@@ -77,28 +77,26 @@ jobs:
           echo "Applying comprehensive backward compatibility shims for Linux 5.4..."
           KSU_DIR="kernel/KernelSU/kernel"
           
-          # 1. 修复 sucompat.c 中的 strncpy_from_user_nofault 缺失
-          if [ -f "$KSU_DIR/feature/sucompat.c" ]; then
-            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' "$KSU_DIR/feature/sucompat.c"
-          fi
-          
-          # 2. 修复 patch_memory.c 中的 copy_to_kernel_nofault 缺失
-          if [ -f "$KSU_DIR/hook/arm64/patch_memory.c" ]; then
-            sed -i 's/copy_to_kernel_nofault/__copy_to_user_inatomic/g' "$KSU_DIR/hook/arm64/patch_memory.c"
-          fi
+          # 1. 全局修复 Linux 5.8+ *_nofault 用户/内核内存拷贝函数在 5.4 中缺失的问题
+          find "$KSU_DIR" -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i \
+            -e 's/strncpy_from_user_nofault/strncpy_from_user/g' \
+            -e 's/copy_from_user_nofault/__copy_from_user_inatomic/g' \
+            -e 's/copy_to_user_nofault/__copy_to_user_inatomic/g' \
+            -e 's/copy_from_kernel_nofault/probe_kernel_read/g' \
+            -e 's/copy_to_kernel_nofault/probe_kernel_write/g' {} +
 
-          # 3. 修复 seccomp_cache.c 中缺少 SECCOMP_ARCH_NATIVE_NR 宏定义的问题
+          # 2. 修复 seccomp_cache.c 中缺少 SECCOMP_ARCH_NATIVE_NR 宏定义的问题
           if [ -f "$KSU_DIR/infra/seccomp_cache.c" ]; then
             sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 64\n#endif' "$KSU_DIR/infra/seccomp_cache.c"
           fi
 
-          # 4. 修复 app_profile.c 中 Linux 5.4 struct seccomp 没有 filter_count 成员的问题
+          # 3. 修复 app_profile.c 中 Linux 5.4 struct seccomp 没有 filter_count 成员的问题
           if ! grep -q "filter_count" kernel/include/linux/seccomp.h; then
-            echo "struct seccomp lacks filter_count in 5.4, patching app_profile.c..."
+            echo "struct seccomp lacks filter_count in 5.4, patching..."
             find "$KSU_DIR" -name "*.c" -exec sed -i '/seccomp\.filter_count/d' {} +
           fi
 
-          # 5. 修复 susfs_extension.c 找不到 linux/susfs_def.h 的问题
+          # 4. 修复 susfs_extension.c 找不到 linux/susfs_def.h 的问题
           if [ ! -f "kernel/include/linux/susfs_def.h" ]; then
             FOUND_SUSFS_DEF=$(find kernel -name "susfs_def.h" | head -1)
             if [ -n "$FOUND_SUSFS_DEF" ]; then
@@ -190,7 +188,6 @@ jobs:
 
           #endif /* _LINUX_SUSFS_DEF_H */
           EOF
-              # 去除由于 YAML 缩进产生的前导空格
               sed -i 's/^          //' kernel/include/linux/susfs_def.h
             fi
           fi
@@ -322,7 +319,6 @@ jobs:
             done
             cat "$BASE_CFG" "$CFG_DIR/vendor/odin_QGKI.config" > "$CFG_DIR/odin_defconfig"
           else
-            # 自动搜索 vendor 目录下任何带 odin 名字的配置
             FOUND_ODIN=$(find "$CFG_DIR" -iname "*odin*" -type f | head -1)
             if [ -n "$FOUND_ODIN" ]; then
               echo "Found $FOUND_ODIN, generating $CFG_DIR/odin_defconfig"
