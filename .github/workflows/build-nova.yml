@@ -71,19 +71,28 @@ jobs:
           chmod +x ci/scripts/nova-setup.py
           python3 ci/scripts/nova-setup.py --kernel "$PWD/kernel"
 
-      - name: Apply Old Kernel 5.4 Compatibility Fixes for SukiSU
+      # === 核心改进：统一、全面的 Linux 5.4 旧内核兼容性自动修复步骤 ===
+      - name: Apply Comprehensive Old Kernel 5.4 Compatibility Fixes
         run: |
-          echo "Applying backward compatibility shims for Linux 5.4..."
-          SUCOMPAT="kernel/KernelSU/kernel/feature/sucompat.c"
-          PATCH_MEM="kernel/KernelSU/kernel/hook/arm64/patch_memory.c"
+          echo "Applying comprehensive backward compatibility shims for Linux 5.4..."
+          KSU_DIR="kernel/KernelSU/kernel"
           
-          if [ -f "$SUCOMPAT" ]; then
-            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' "$SUCOMPAT"
+          # 1. 修复 sucompat.c 中的 strncpy_from_user_nofault 缺失
+          if [ -f "$KSU_DIR/feature/sucompat.c" ]; then
+            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' "$KSU_DIR/feature/sucompat.c"
           fi
           
-          if [ -f "$PATCH_MEM" ]; then
-            sed -i 's/copy_to_kernel_nofault/__copy_to_user_inatomic/g' "$PATCH_MEM"
+          # 2. 修复 patch_memory.c 中的 copy_to_kernel_nofault 缺失
+          if [ -f "$KSU_DIR/hook/arm64/patch_memory.c" ]; then
+            sed -i 's/copy_to_kernel_nofault/__copy_to_user_inatomic/g' "$KSU_DIR/hook/arm64/patch_memory.c"
           fi
+
+          # 3. 修复 seccomp_cache.c 中缺少 SECCOMP_ARCH_NATIVE_NR 宏定义的问题
+          if [ -f "$KSU_DIR/infra/seccomp_cache.c" ]; then
+            sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 64\n#endif' "$KSU_DIR/infra/seccomp_cache.c"
+          fi
+          
+          echo "All 5.4 compatibility shims applied successfully."
 
       - name: Apply no_policy boot bisect
         if: ${{ inputs.ksu_mode == 'no_policy' }}
