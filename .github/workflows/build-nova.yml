@@ -65,7 +65,8 @@ jobs:
           echo "SukiSU-Nova commits: $(git -C kernel/KernelSU rev-list --count HEAD)"
           echo "SukiSU-Nova HEAD: $(git -C kernel/KernelSU rev-parse --short HEAD)"
           echo "SukiSU-Nova tag : $(git -C kernel/KernelSU describe --tags --always 2>/dev/null || echo unknown)"
-
+       - name: Clean up old kernelsu residues
+         run: rm -rf kernel/drivers/kernelsu
       - name: Integrate SukiSU-Nova on odin 5.4
         run: |
           chmod +x ci/scripts/nova-setup.py
