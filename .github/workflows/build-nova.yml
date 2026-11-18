@@ -71,7 +71,7 @@ jobs:
           chmod +x ci/scripts/nova-setup.py
           python3 ci/scripts/nova-setup.py --kernel "$PWD/kernel"
 
-      # === 核心改进：统一、全面的 Linux 5.4 旧内核兼容性自动修复步骤 ===
+      # === 核心改进 1：统一、全面的 Linux 5.4 旧内核兼容性自动修复步骤 ===
       - name: Apply Comprehensive Old Kernel 5.4 Compatibility Fixes
         run: |
           echo "Applying comprehensive backward compatibility shims for Linux 5.4..."
@@ -201,6 +201,41 @@ jobs:
           echo "TCBIN=$TCDIR" >> "$GITHUB_ENV"
           "$TCDIR/clang" --version
 
+      # === 核心改进 2：自动在 arch/arm64/configs/ 下定位或合成 odin_defconfig ===
+      - name: Prepare odin_defconfig
+        run: |
+          cd kernel
+          CFG_DIR="arch/arm64/configs"
+          if [ -f "$CFG_DIR/odin_defconfig" ]; then
+            echo "Found existing $CFG_DIR/odin_defconfig"
+          elif [ -f "$CFG_DIR/vendor/odin_defconfig" ]; then
+            echo "Copying $CFG_DIR/vendor/odin_defconfig -> $CFG_DIR/odin_defconfig"
+            cp "$CFG_DIR/vendor/odin_defconfig" "$CFG_DIR/odin_defconfig"
+          elif [ -f "$CFG_DIR/vendor/odin_QGKI.config" ]; then
+            echo "Merging lahaina-qgki_defconfig + vendor/odin_QGKI.config -> $CFG_DIR/odin_defconfig"
+            BASE_CFG=""
+            for b in "$CFG_DIR/vendor/lahaina-qgki_defconfig" "$CFG_DIR/vendor/lahaina_defconfig" "$CFG_DIR/gki_defconfig" "$CFG_DIR/defconfig"; do
+              if [ -f "$b" ]; then BASE_CFG="$b"; break; fi
+            done
+            cat "$BASE_CFG" "$CFG_DIR/vendor/odin_QGKI.config" > "$CFG_DIR/odin_defconfig"
+          else
+            # 自动搜索 vendor 目录下任何带 odin 名字的配置
+            FOUND_ODIN=$(find "$CFG_DIR" -iname "*odin*" -type f | head -1)
+            if [ -n "$FOUND_ODIN" ]; then
+              echo "Found $FOUND_ODIN, generating $CFG_DIR/odin_defconfig"
+              if grep -q "CONFIG_ARM64=y" "$FOUND_ODIN"; then
+                cp "$FOUND_ODIN" "$CFG_DIR/odin_defconfig"
+              else
+                BASE_CFG=$(find "$CFG_DIR" -maxdepth 2 \( -name "lahaina*defconfig" -o -name "gki_defconfig" -o -name "defconfig" \) | head -1)
+                cat "$BASE_CFG" "$FOUND_ODIN" > "$CFG_DIR/odin_defconfig"
+              fi
+            else
+              echo "::error::Could not find any odin config in $CFG_DIR! Listing contents:"
+              find "$CFG_DIR" -maxdepth 3
+              exit 1
+            fi
+          fi
+
       - name: Fast compile gate (KSU objects)
         run: |
           cd kernel
@@ -301,6 +336,10 @@ jobs:
           ./scripts/config --file out/.config "${CFG[@]}"
           make -j"$(nproc)" O=out olddefconfig
 
+          # 将最终合并好 SukiSU-Nova + SUSFS 的配置精简导出为标准 odin_defconfig
+          make -j"$(nproc)" O=out savedefconfig
+          cp out/defconfig arch/arm64/configs/odin_defconfig
+
           make -j"$(nproc)" O=out LOCALVERSION="-$NEKO_VER" \
             KSU_VERSION="$KSU_VERSION" KSU_VERSION_FULL="$KSU_VERSION_FULL" \
             Image Image.gz
@@ -320,6 +359,7 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image artifact/Image
           cp kernel/out/arch/arm64/boot/Image.gz artifact/Image.gz || true
           cp kernel/out/.config artifact/kernel.config
+          cp kernel/arch/arm64/configs/odin_defconfig artifact/odin_defconfig
           (cd artifact && sha256sum Image > Image.sha256)
           strings artifact/Image | grep -m3 'Linux version' || true
 
