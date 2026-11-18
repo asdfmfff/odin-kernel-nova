@@ -71,14 +71,18 @@ jobs:
           chmod +x ci/scripts/nova-setup.py
           python3 ci/scripts/nova-setup.py --kernel "$PWD/kernel"
 
-      # === 新增：不修改 SukiSU 源码本身，通过外置 sed 修复旧内核 5.4 缺少的符号兼容问题 ===
       - name: Apply Old Kernel 5.4 Compatibility Fixes for SukiSU
         run: |
           echo "Applying backward compatibility shims for Linux 5.4..."
           SUCOMPAT="kernel/KernelSU/kernel/feature/sucompat.c"
+          PATCH_MEM="kernel/KernelSU/kernel/hook/arm64/patch_memory.c"
+          
           if [ -f "$SUCOMPAT" ]; then
-            # 如果旧内核没有 strncpy_from_user_nofault，自动降级为 strncpy_from_user
             sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' "$SUCOMPAT"
+          fi
+          
+          if [ -f "$PATCH_MEM" ]; then
+            sed -i 's/copy_to_kernel_nofault/__copy_to_user_inatomic/g' "$PATCH_MEM"
           fi
 
       - name: Apply no_policy boot bisect
